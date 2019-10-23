@@ -7,160 +7,22 @@ Description: Evaluator used in the context of the DARC (Data Anonymization and R
 Competition).
 """
 
-from multiprocessing import Pool
-from functools import partial
 import os
-from io import BytesIO
+import logging
 
 import pandas as pd
 import redis
-import owncloud
 
 try:
-    from metrics import UtilityMetrics, ReidentificationMetrics
-    from preprocessing import round1_preprocessing, round2_preprocessing, read_tar
-    from utils import *
+    from darc_core.metrics import Metrics, utility_metric
+    from darc_core.preprocessing import round1_preprocessing, round2_preprocessing, read_tar
+    from darc_core.utils import check_format_f_file, check_format_trans_file
+    from config import Config as config
 except ImportError:
-    from .metrics import UtilityMetrics, ReidentificationMetrics
-    from .preprocessing import round1_preprocessing, round2_preprocessing, read_tar
-    from .utils import *
-
-
-def metric_wrapper(metric, instance, numero):
-    """Launch a metric in function of instance metric and the number of the later.
-
-    :metric: a single char wich is 's' or 'e', respectivly for reid and utility metrics.
-    :instance: the instance of a Metric class containing methods `metric`.
-    :numero: the ieme method of the instance you want to call.
-
-    :returns: Result of the metric method called.
-
-    """
-    method = "{}{}_metric".format(metric, numero)
-    return getattr(instance, method)()
-
-def compute_score_round1(ground_truth, aux_database, submission):
-    """Compute score for the 1st round of the competition. Score are based on utility metrics
-    and Re-identification metrics. The score kept is the max of each category. Score go from 0
-    (best) to 1 (worst).
-
-    :ground_truth: DataFrame representing the ground truth data
-    :aux_database: DataFrame containing a list of users present in the ground truth
-    :submission: DataFrame representing the anonymized transaction database
-    :returns: both utility and the f_file
-
-    """
-    # Initialize utility metrics
-    utility_m = UtilityMetrics(aux_database, ground_truth, submission)
-
-    #Compute utility metrics as subprocesses
-    print("Compute Utility metrics")
-    metric_pool = Pool()
-    utility_wrapper = partial(metric_wrapper, "e", utility_m)
-    utility_scores = metric_pool.map(utility_wrapper, range(1, 7))
-
-    # Initialize re-identification metrics
-    reid_m = ReidentificationMetrics(aux_database, ground_truth, submission)
-
-    #Compute reidentification metrics as subprocesses
-    print("Compute Reidentification metrics")
-    metric_pool = Pool()
-    reid_wrapper = partial(metric_wrapper, "s", reid_m)
-    reid_scores = metric_pool.map(reid_wrapper, range(1, 7))
-
-    # Recover F_orig file
-    f_file = reid_m.f_orig
-    s_file = reid_m.anonymized
-
-    return utility_scores, reid_scores, f_file, s_file
-
-def compute_score_round2(ground_truth, submission):
-    """ Return the re-identification score done by the team submitting on the file anonymized by
-    another team.
-
-    It's the score of this team we have to move in the classement.
-    :returns: the re-identification score obtained by the anonymized file.
-
-    """
-    return compare_f_files(ground_truth, submission)
-
-def save_first_round_attempt(team_id, at_data, s_data, f_data,\
-                             crowdai_submission_id, redis_c, oc):
-    """Save the attempt of team `team_id`. Attempt are stored as Y_CROWDAI_SUBMISSION_ID
-    with Y in :
-            - AT : the submission
-            - S : AT with DEL row deleted
-            - F : correspondance between id and pseudo
-
-    :team_id: The id of the team submitting the anonymized file.
-    :at_data: the submission
-    :s_data: AT with DEL row deleted
-    :f_data: correspondance between id and pseudo
-    :crowdai_submission_id: the submission id in crowdai
-    :redis_c: one working redis connection
-    :oc: one working owncloud connection
-
-    """
-    nb_try = redis_c.llen("{}_id_sub".format(team_id))
-
-    if nb_try == 3:
-        id_sub = int(redis_c.lpop("{}_id_sub".format(team_id)))
-
-        oc.delete("AT_{}.csv".format(id_sub))
-        oc.delete("S_{}.csv".format(id_sub))
-        oc.delete("F_{}.csv".format(id_sub))
-
-        # ENLEVER id sub
-
-    err = []
-    err.append(oc.put_file_contents(
-        data=at_data.to_csv(index=False),
-        remote_path="AT_{}.csv".format(crowdai_submission_id)
-        ))
-    err.append(oc.put_file_contents(
-        data=s_data.to_csv(index=False),
-        remote_path="S_{}.csv".format(crowdai_submission_id)
-        ))
-    err.append(oc.put_file_contents(
-        data=f_data.to_csv(index=False),
-        remote_path="F_{}.csv".format(crowdai_submission_id)
-        ))
-
-    err.append(redis_c.rpush("{}_id_sub".format(team_id), crowdai_submission_id))
-
-    if not min(err):
-        raise Exception("Error while saving files for round 1")
-        return False
-    return True
-
-class OwnCloudConnection():
-    """
-    Do the connection to owncloud data base
-    """
-
-    def __init__(self, host, usr, password):
-        """
-        init function
-        """
-        self._host = host
-        self._usr = usr
-        self._password = password
-        self._oc = self._connect_to_bdd()
-
-    def _connect_to_bdd(self):
-        """Set the first connection
-        :returns: connection
-
-        """
-        oc_client = owncloud.Client(self._host)
-        oc_client.login(self._usr, self._password)
-
-        return oc_client
-
-    def get_oc_connection(self):
-        """Return the connection to the owncloud data base
-        """
-        return self._oc
+    from .darc_core.metrics import Metrics, utility_metric
+    from .darc_core.preprocessing import round1_preprocessing, round2_preprocessing, read_tar
+    from .darc_core.utils import check_format_f_file, check_format_trans_file
+    from .config import Config as config
 
 class RedisConnection():
 
@@ -247,11 +109,11 @@ class RedisConnection():
 class DarcEvaluator():
     """
     Evaluate submission file of users in the context od DARC competition
-    This is a fork from crowdai_evaluator https://github.com/crowdAI/crowdai-example-evaluator
+    This is a fork from aicrowd_evaluator https://github.com/AIcrowd/AIcrowd-example-evaluator
     """
     def __init__(self, answer_file_path, round=1,
                  redis_host='127.0.0.1', redis_port=6379, redis_password=False,
-                 oc_host="http://http://redisdarc.insa-cvl.fr:8080", oc_usr=False, oc_password=False
+                 round2_storage=None
                 ):
         """
         `round` : Holds the round for which the evaluation is being done.
@@ -265,36 +127,34 @@ class DarcEvaluator():
         self.redis_host = redis_host
         self.redis_port = redis_port
         self.redis_password = redis_password
-
-        self.oc_co = ""
-        self.oc_host = oc_host
-        self.oc_usr = oc_usr
-        self.oc_password = oc_password
-
+        self.round2_storage = round2_storage
 
     def _evaluate(self, client_payload, _context={}):
         """
         `client_payload` will be a dict with (atleast) the following keys :
           - submission_file_path : local file path of the submitted file
-          - crowdai_submission_id : A unique id representing the submission
-          - crowdai_participant_id : A unique id for participant/team submitting (if enabled)
+          - aicrowd_submission_id : A unique id representing the submission
+          - aicrowd_participant_id : A unique id for participant/team submitting (if enabled)
         """
 
         # Initialize redis_co
         self.redis_co = RedisConnection(self.redis_host, self.redis_port, self.redis_password)
-        self.oc_co = OwnCloudConnection(self.oc_host, self.oc_usr, self.oc_password)
 
         # Initialize directory variable
         submission_file_path = client_payload["submission_file_path"]
-        crowdai_submission_uid = client_payload["crowdai_participant_id"]
-        crowdai_submission_id = client_payload["crowdai_submission_id"]
+        try:
+            aicrowd_submission_uid = client_payload["crowdai_participant_id"]
+            aicrowd_submission_id = client_payload["crowdai_submission_id"]
+        except Exception:
+            aicrowd_submission_uid = client_payload["aicrowd_participant_id"]
+            aicrowd_submission_id = client_payload["aicrowd_submission_id"]
 
 
         ## ROUND 1
         if self.round == 1:
 
             # Read database from files
-            ground_truth, aux_database, submission = round1_preprocessing(
+            ground_truth, submission = round1_preprocessing(
                 self.answer_file_path, submission_file_path
             )
 
@@ -302,26 +162,31 @@ class DarcEvaluator():
             check_format_trans_file(ground_truth, submission)
 
             # Determine all the scores for a anonymization transaction file
-            utility_scores, reid_scores, f_file, s_file = compute_score_round1(
-                ground_truth, aux_database, submission
-            )
+            metric = Metrics(ground_truth, submission)
+            scores = metric.scores()
 
-            err = save_first_round_attempt(
-                crowdai_submission_uid,
-                submission,
-                s_file,
-                f_file,
-                crowdai_submission_id,
-                self.redis_co.get_redis_connection(),
-                self.oc_co.get_oc_connection()
-                )
-
-            if not err :
-                raise Exception("Error while saving the files in first round")
+            # TODO: This should be done only for the inter round submission (i.e. the final ones) <27-06-19, antoine> #
+            # save score submission_reid for round2
+            self.redis_co.set_value(f"{aicrowd_submission_id}", max(scores[6:12]))
 
             _result_object = {
-                "score" : max(utility_scores),
-                "score_secondary": max(reid_scores)
+                "score" : (max(scores[0:6]) + max(scores[6:13]))/2,
+                "score_secondary": max(scores[0:6]),
+                "meta" : {
+                    "e1":scores[0],
+                    "e2":scores[1],
+                    "e3":scores[2],
+                    "e4":scores[3],
+                    "e5":scores[4],
+                    "e6":scores[5],
+                    "s1":scores[6],
+                    "s2":scores[7],
+                    "s3":scores[8],
+                    "s4":scores[9],
+                    "s5":scores[10],
+                    "s6":scores[11],
+                    "s7":scores[12]
+                    }
                 }
             return _result_object
 
@@ -329,45 +194,70 @@ class DarcEvaluator():
         elif self.round == 2:
 
             #Read tar file
-            submission_file_path, crowdai_submission_id_attacked = read_tar(
+            submission_file_path, aicrowd_submission_id_attacked = read_tar(
                 submission_file_path
                 )
 
-            # Recover ground Truth from Redis database
-            try:
-                ground_truth = pd.read_csv(BytesIO(
-                    self.oc_co.get_oc_connection().get_file_contents(
-                        "F_{}.csv".format(crowdai_submission_id_attacked)
-                        )
-                    ))
-            except ValueError:
-                raise Exception("There is no team with submission number {}".format(
-                    crowdai_submission_id_attacked
-                    ))
+            # Recover ground_truth
+            ground_truth = round1_preprocessing(self.answer_file_path)
 
             # Read submitted files and ground truth
             submission = round2_preprocessing(submission_file_path)
 
+            # Recover ground Truth from Redis database
+            try:
+                at_origin = pd.read_csv(f"{self.round2_storage}/{aicrowd_submission_id_attacked}.csv")
+            except FileNotFoundError:
+                raise Exception("There is no team with submission number {}".format(
+                    aicrowd_submission_id_attacked
+                    ))
+
             # Check if they've attacked them 10 times already
             nb_atcks = self.redis_co.get_nb_try_reid(
-                crowdai_submission_uid, crowdai_submission_id_attacked
+                aicrowd_submission_uid, aicrowd_submission_id_attacked
                 )
             if nb_atcks >= 10:
                 raise Exception("You've reach your 10 attempts on this file.")
 
             # Compute score for round 2
             check_format_f_file(submission)
-            reidentification_score = compute_score_round2(ground_truth, submission)
+
+            metrics = Metrics(ground_truth, at_origin)
+            reidentification_score = metrics.compare_f_files(submission)
 
             # Increment by 1 the number of attempts
             self.redis_co.set_nb_try_reid(
-                nb_atcks+1, crowdai_submission_uid, crowdai_submission_id_attacked
+                nb_atcks+1, aicrowd_submission_uid, aicrowd_submission_id_attacked
                 )
+
+            # Update score of submission
+            previous_score = float(self.redis_co.get_value(aicrowd_submission_id_attacked) or 0)
+            attack_success = False
+            attck_sc = float(self.redis_co.get_value(f"{aicrowd_submission_id}_attck_sc") or 0)
+
+            if previous_score < reidentification_score:
+                self.redis_co.set_value(reidentification_score, aicrowd_submission_id_attacked)
+                attack_success = True
+                diff_sc = reidentification_score - previous_score
+                attck_sc = attck_sc + diff_sc
+
+            nb_atcks_success = int(
+                self.redis_co.get_value(f"{aicrowd_submission_id}_attck_succ") or 0
+            )
+            if attack_success:
+                nb_atcks_success += 1
+                self.redis_co.set_value(nb_atcks_success, f"{aicrowd_submission_id}_attck_succ")
+
+            # Compute the attack score as the mean of all attacks
+            if nb_atcks_success > 0:
+                attck_sc /= nb_atcks_success
+            else:
+                attck_sc = 0
 
             # Return object
             _result_object = {
                 "score": reidentification_score,
-                "score_secondary": 0
+                "score_secondary": attck_sc
                 }
 
             # Remove submission_file extracted
@@ -380,72 +270,68 @@ class DarcEvaluator():
 def main():
     """Main loop
     """
-    answer_file_path = "data/ground_truth.csv"
+    #log file when Docker is launch
+    try:
+        logging.basicConfig(filename='/test/darc.log', level=logging.DEBUG)
+    except Exception:
+        pass
+
+    answer_file_path = config.GROUND_TRUTH
 
     _client_payload = {}
-    # The submission file of the team
-    # For the round 1 : the anonymized transactional database
-    # For the round 2 : a tar file containing :
-    #                       - The F_file of the team attacked.
-    #                       - A json file containing the two following attributes :
-    #                       'submission_id_attacked' and 'submission_id_attacked'
-    #
 
-    _client_payload["crowdai_participant_id"] = "a"
+    # Setting name of submitting team
+    _client_payload["aicrowd_participant_id"] = "a"
 
-    print("TESTING: Round 1")
+    logging.info("TESTING: Round 1")
 
     # Ground truth path for round 1
-    _client_payload["submission_file_path"] = "data/example_files/submission_DEL.csv"
-    # Name of the current team who is submitting the file
-    # It **SHALL** not contains "_" char.
-    _client_payload["crowdai_submission_id"] = 2
+    _client_payload["submission_file_path"] = config.R1_SUBMISSION_FILE
 
-    RHOST = os.getenv("REDIS_HOST", False)
-    RPORT = int(os.getenv("REDIS_PORT", 6379))
-    RPASSWORD = os.getenv("REDIS_PASSWORD", False)
+    # Setting the submission id
+    _client_payload["aicrowd_submission_id"] = 2
 
-    OCHOST = os.getenv("OC_HOST", False)
-    OCUSR = os.getenv("OC_USR", False)
-    OCPASSWORD = os.getenv("OC_PASSWORD", False)
+    # Reading info for stockage server
+    RHOST = config.REDIS_HOST
+    RPORT = config.REDIS_PORT
+    RPASSWORD = config.REDIS_PASSWORD
 
-    if RHOST == False:
+    if not RHOST:
         raise Exception("Please provide the Redis Host and other credentials, by providing the following environment variables : REDIS_HOST, REDIS_PORT, REDIS_PASSWORD")
-    if OCHOST == False:
-        raise Exception("Please provide the OwnCloud Host and other credentials, by providing the following environment variables : OC_HOST, OC_USR, OC_PASSWORD")
 
     _context = {}
+
     # Instantiate an evaluator
-    crowdai_evaluator = DarcEvaluator(
+    aicrowd_evaluator = DarcEvaluator(
         answer_file_path, round=1,
-        redis_host=RHOST, redis_port=RPORT, redis_password=RPASSWORD,
-        oc_host=OCHOST, oc_usr=OCUSR, oc_password=OCPASSWORD
+        redis_host=RHOST, redis_port=RPORT, redis_password=RPASSWORD
         )
+
     # Evaluate
-    result = crowdai_evaluator._evaluate(
+    result = aicrowd_evaluator._evaluate(
         _client_payload, _context
         )
-    print(result)
 
-    print("TESTING : Round 2")
-    # Ground truth path for round 2
-    # It is recovered during the round2 in method evaluate
+    logging.info(f"Scores : {result}")
+
+    logging.info("TESTING : Round 2")
 
     # Submission file for round 2
-    _client_payload["submission_file_path"] = "./data/example_files/F_a_attempt_2.tar"
+    _client_payload["submission_file_path"] = config.R2_SUBMISSION_FILE
 
     # Instantiate an evaluator
-    crowdai_evaluator = DarcEvaluator(
+    aicrowd_evaluator = DarcEvaluator(
         answer_file_path, round=2,
         redis_host=RHOST, redis_port=RPORT, redis_password=RPASSWORD,
-        oc_host=OCHOST, oc_usr=OCUSR, oc_password=OCPASSWORD
+        round2_storage = config.ROUND2_STORAGE
         )
+
     #Evaluate
-    result = crowdai_evaluator._evaluate(
+    result = aicrowd_evaluator._evaluate(
         _client_payload, _context
         )
-    print(result)
+
+    logging.info(f"Scores : {result}")
 
 if __name__ == "__main__":
     main()
-
