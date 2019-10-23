@@ -1,5 +1,14 @@
 # DARC - Data Anonymisation and Re-identification Competition
 
+## Team Maryam, Nacir, Maxime, Othmane
+
+This Repository contains our collective input for the DARC Competition Project. 
+
+The Original Documentation for the metrics used can be found below.
+
+
+## Original Documentation 
+
 This Repository contains all source code for PETS Competition: DARC. More
 specifically it contains:
 
