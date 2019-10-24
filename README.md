@@ -4,7 +4,7 @@
 
 This Repository contains our input for the DARC Competition Project.
 
-Initial Collaboration from Maryam PC
+
 
 
 This is a python application of DARC. DARC is a competition held at PETs on the
