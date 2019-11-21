@@ -24,9 +24,9 @@ WORKDIR /DARC/darc_compare
 RUN git checkout tested
 # RUN git clone --branch tested https://gitlab.ikb.info.uqam.ca/alaurent/darc_aicrowd.git /DARC/darc_compare
 
-RUN cp ./config.py.example ./config.py
+#RUN cp ./config.py.example ./config.py
 RUN touch __init__.py
 
-WORKDIR /DARC
+WORKDIR /DARC/Master
 
 # vi: ft=dockerfile
