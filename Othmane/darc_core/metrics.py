@@ -823,8 +823,8 @@ def utility_metric(ground_truth, sub):
     utility_scores = metric_pool.map(utility_wrapper, range(1, 7))
 
     #Compute reidentification metrics as subprocesses
-    metric_pool = Pool()
-    reid_wrapper = partial(metric_wrapper, "s", metric)
-    reid_scores = metric_pool.map(reid_wrapper, range(1, 8))
+    #metric_pool = Pool()
+    #reid_wrapper = partial(metric_wrapper, "s", metric)
+    #reid_scores = metric_pool.map(reid_wrapper, range(1, 8))
 
-    return utility_scores + reid_scores
+    return utility_scores

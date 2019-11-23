@@ -9,8 +9,8 @@ class Config:
     ROUND2_STORAGE = "data/testing_files/r2_storage/"
 
     GROUND_TRUTH = "data/ground_truth.csv"
-    R1_SUBMISSION_FILE = "data/example_files/submission_DEL.csv"
-    R2_SUBMISSION_FILE = "./data/example_files/F_a_attempt_2.tar"
+    R1_SUBMISSION_FILE = "../Othmane/atx1.csv"
+    R2_SUBMISSION_FILE = "../Othmane/F_example.csv"
     TESTING_DIR = "data/testing_files/"
 
     metric_class = Metrics
