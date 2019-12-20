@@ -24,7 +24,7 @@ First sets generated - Exploration Phase :
 ./anonymized sets
 
 For the rest, you will find most of our final sets in :
-../master/competition
+../master/k4ntoul4/competition
 
 
 
