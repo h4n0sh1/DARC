@@ -1,4 +1,4 @@
-# DARC - Team MOON
+# DARC - Team K4toul4
 
 ## Data Anonymisation and Re-identification Competition
 
@@ -6,7 +6,6 @@
 
 This Repository contains our collaborative work for the DARC Competition Project.
 
-Folders are named against each member for further clarity in terms of individual input, and addition to the group. 
 
 
 

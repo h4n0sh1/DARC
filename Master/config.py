@@ -10,7 +10,7 @@ class Config:
 
     GROUND_TRUTH = "data/ground_truth.csv"
     R1_SUBMISSION_FILE = "../Othmane/atx1.csv"
-    R2_SUBMISSION_FILE = "../Othmane/F_example.csv"
+    R2_SUBMISSION_FILE = "../Othmane/F.tar"
     TESTING_DIR = "data/testing_files/"
 
     metric_class = Metrics
